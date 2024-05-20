@@ -1,13 +1,17 @@
 [utility]
-utility.example.com
-
-[primary]
+utility.homelab.k8s ansible_host=192.168.200.3
 
 [masters]
+master.homelab.k8s ansible_host=192.168.200.4
 
 [workers]
+worker1.homelab.k8s ansible_host=192.168.200.5
+worker2.homelab.k8s ansible_host=192.168.200.6
 
 [cluster:children]
 masters
 workers
 
+[all:vars]
+ansible_user = ansible
+ansible_ssh_private_key_file = ./do-not-delete/k8s_vms_rsa

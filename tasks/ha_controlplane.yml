@@ -1,0 +1,35 @@
+- name: Generating kubeadm init commandline
+  ansible.builtin.template:
+    src: templates/kubeadm_init.j2
+    dest: tasks/kubeadm_init_cmd.yml
+    mode: '0664'
+  become: false
+  delegate_to: localhost
+
+- name: Including kubeadm command line
+  ansible.builtin.include_tasks:
+    file: tasks/kubeadm_init_cmd.yml
+
+- name: Adding details to masters join script
+  ansible.builtin.shell: |
+    set -o pipefail
+    tail -n12 < ~/controlplane.log | head -n3 >> ~/join_masters.sh
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Adding details to workers join script
+  ansible.builtin.shell: 'tail -n2 ~/controlplane.log >> ~/join_workers.sh'
+  changed_when: true
+
+- name: Copying masters join script to Controller
+  ansible.builtin.fetch:
+    src: ~/join_masters.sh
+    dest: ./generated/join_masters.sh
+    flat: true
+
+- name: Copying workers join script to Controller
+  ansible.builtin.fetch:
+    src: ~/join_workers.sh
+    dest: ./generated/join_workers.sh
+    flat: true

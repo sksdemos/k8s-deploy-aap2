@@ -1,0 +1,63 @@
+---
+# This play does a hygiene check on whether the cluster hosts are reachable and if the sizing is correct
+# before beginning cluster installation. This playbook also sets the cluster installation for HA mode if
+# number of masters >=3 and in odd numbers
+#
+# ASSUMPTIONS:
+# Will make use of sudo password in the configs/password.yml in clear text
+#
+
+- name: Validating cluster machines and sizing
+  hosts: all
+  gather_facts: false
+  become: false
+  vars_files:
+    - 'configs/password.yml'
+
+  tasks:
+
+    - name: Checking if cluster machines are reachable
+      ansible.builtin.ping:
+
+    # Uses magic variables to test list of active hosts Vs total hosts targeted by the play
+    - name: Checking all targeted DNS hosts
+      run_once: true
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts == ansible_play_hosts_all
+        msg: "One or more cluster hosts could not be reached. Check DNS/inventory"
+
+    - name: Reset HA parameters
+      ansible.builtin.copy:
+        content: |
+          ha_cluster: false
+        dest: generated/ha.yml
+        mode: '0664'
+      become: false
+      delegate_to: localhost
+      run_once: true
+
+    - name: Checking total master
+      ansible.builtin.assert:
+        that:
+          - groups.masters | count | int > 0
+          - groups.masters | count | int % 2 != 0
+        msg: "k8s masters count should be a positive odd number i.e. 1, 3, 5 etc"
+      run_once: true
+
+    - name: Checking for HA requirements
+      ansible.builtin.copy:
+        content: |
+          ha_cluster: true
+        dest: generated/ha.yml
+        mode: '0664'
+      when: groups.masters | count | int >= 3
+      run_once: true
+      become: false
+
+    - name: Checking total workers
+      ansible.builtin.assert:
+        that:
+          - groups.workers | count | int > 0
+        msg: "k8s workers count should be > 0"
+      run_once: true

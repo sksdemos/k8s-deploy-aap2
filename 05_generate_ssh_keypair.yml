@@ -1,0 +1,53 @@
+---
+# This Playbook creates an SSH keypair for Ansible to have key based access to VMs
+#
+# ASSUMPTIONS:
+# You are running this playbook as a user you are currently logged on
+# Your user account has sudo access and you have the sudo password
+# You are willing to store the sudo password in the configs/password.yml with or without vault encryption.
+#
+# NOTE: without the sudo password tasks up ahead may fail
+#
+
+
+- name: Generating open ssh keypair for the current user on the control node
+  hosts: localhost
+  become: false
+  gather_facts: false
+  vars_files:
+    - configs/password.yml
+  vars:
+    ansible_become_password: "{{ sudo_password }}"
+    ansible_connection: local
+  tasks:
+
+    - name: Install sshpass package
+      ansible.builtin.yum:
+        name: sshpass
+        state: installed
+      become: true
+
+    - name: Creating backup folder
+      ansible.builtin.file:
+        path: do-not-delete
+        state: directory
+        mode: '0775'
+
+    - name: Generating key pair for Ansible access
+      community.crypto.openssh_keypair:
+        path: "do-not-delete/k8s_vms_rsa"
+        owner: "{{ loggedin_user }}"
+        group: "{{ loggedin_user }}"
+        state: present
+
+    - name: Copy private key for k8s VMs to home directory
+      ansible.builtin.copy:
+        src: "do-not-delete/k8s_vms_rsa"
+        dest: "/home/{{ loggedin_user }}/.ssh/k8s_vms_rsa"
+        mode: '0775'
+
+    # This deletion just takes care of man-in-the-middle ssh issues
+    - name: Removing known_hosts for current user
+      ansible.builtin.file:
+        path: "/home/{{ lookup('env', 'USER') }}/.ssh/known_hosts"
+        state: absent

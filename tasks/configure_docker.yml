@@ -1,0 +1,46 @@
+- name: Add the official Docker CE package repository
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/centos/docker-ce.repo
+    dest: /etc/yum.repos.d
+    force: true
+    mode: '0644'
+
+    # Docker Components specific steps
+- name: Installing Docker runtime components
+  ansible.builtin.yum:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - fuse-overlayfs
+
+- name: Create docker folder
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    mode: "u=rw,g=wx,o=rwx"
+
+- name: Configure cgroup for Docker daemon
+  ansible.builtin.copy:
+    dest: "/etc/docker/daemon.json"
+    content: |
+      {
+        "exec-opts": ["native.cgroupdriver=systemd"],
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "100m"
+        },
+        "storage-driver": "overlay2"
+      }
+    mode: '0644'
+
+- name: Enable and start Docker
+  ansible.builtin.service:
+    name: docker
+    enabled: true
+    state: started
+
+# - name: add your login user to the Docker group
+#   user:
+#     name: '{{ non_admin }}'
+#     groups: docker
+#     append: yes

@@ -1,0 +1,77 @@
+---
+# Objective of this playbook is to configure all k8s masters for HA
+#
+# ASSUMPTIONS:
+# Will make use of sudo password in the configs/password.yml in clear text
+# HAproxy will be configured to load balance the k8s apiserver
+# keepalived will be used to impliment a Virtual IP address that will be used to frontend the api server
+# If the number of masters in the control plane is one then this playbook ends (so no HA in that case)
+#
+
+
+- name: Configuring Kubernetes for HA (if required)
+  hosts: masters
+  gather_facts: false
+  vars_files:
+    - 'configs/password.yml'
+    - 'configs/k8s-config.yml'
+    - 'generated/cloudinit-config.yml'
+
+  tasks:
+    - name: Getting HA status
+      ansible.builtin.include_vars:
+        file: generated/ha.yml
+
+    - name: Updating application-list.readme
+      ansible.builtin.lineinfile:
+        line: 'K8s Cluster installation: (Non HA)'
+        path: cluster-info.readme
+        create: true
+        mode: '0664'
+      when: not ha_cluster
+      delegate_to: localhost
+      become: false
+
+    - name: End play decision
+      ansible.builtin.meta: end_play
+      when: not ha_cluster
+
+    - name: Install keepalived and HAproxy package
+      ansible.builtin.yum:
+        name:
+          - keepalived
+          - haproxy
+          - psmisc
+        state: installed
+
+    - name: Generate shell script for API server testing
+      ansible.builtin.template:
+        src: templates/checkAPIserver.sh.j2
+        dest: /etc/keepalived/checkAPIserver.sh
+        mode: '0770'
+
+    - name: Configure keepalived for k8s masters
+      ansible.builtin.template:
+        src: templates/keepalived.conf.j2
+        dest: /etc/keepalived/keepalived.conf
+        backup: true
+        mode: '0644'
+
+    - name: Configure haproxy for k8s masters
+      ansible.builtin.template:
+        src: templates/haproxy.cfg.j2
+        dest: /etc/haproxy/haproxy.cfg
+        backup: true
+        mode: '0644'
+
+    - name: Starting the haproxy service
+      ansible.builtin.service:
+        name: haproxy
+        state: started
+        enabled: true
+
+# NOTE: keepalived was installed and configured but was not started or enabled as it uses a health check script that looks out for the kube apiserver
+#       and since none of the masters have been configured. It will be started as and when the masters are setup by playbooks later. Starting this
+#       will cause keepalived to detect downtime and start rotate the Virtual IP across all the masters causing failure of secondary masters and
+#       workers to join
+#

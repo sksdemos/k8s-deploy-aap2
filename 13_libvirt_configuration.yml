@@ -1,0 +1,28 @@
+---
+# This Playbook sets up the host for Virtualization with required libraries
+#
+# ASSUMPTIONS:
+# The host should have access to the Internet or the necessary repositories to configure libvirt/kvm
+# Will make use of sudo password in the configs/password.yml in clear text
+# Overriding of variables in role/defaults is in configs/libvirt-config.yml.
+# Creates a separate storage and network for Basic Ansible infrastructure
+#
+# NOTE: The entire libvirt configuration is driven using the role libvirt_setup
+#
+
+
+- name: Libvirt configuration
+  hosts: localhost
+  become: true
+  vars_files:
+    - 'configs/password.yml'
+    - 'generated/libvirt-config.yml'
+
+  vars:
+    ansible_become_password: "{{ sudo_password }}"
+    ansible_connection: local
+
+  tasks:
+    - name: Starting libvirt setup
+      ansible.builtin.include_role:
+        name: techiesanjay.libvirt_infra.libvirt_setup

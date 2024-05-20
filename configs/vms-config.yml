@@ -1,0 +1,62 @@
+#------------------------------------------------------------#
+# libvirt_setup and cloud_init VM and DNS specific variables #
+#------------------------------------------------------------#
+
+# DO NOT EDIT WITHOUT CONSULTING DOCUMENTATION FOR VMG ROLE #
+
+# Centos 8 Cloud image: https://cloud.centos.org/centos/8-stream/x86_64/images/CentOS-Stream-GenericCloud-8-latest.x86_64.qcow2 
+# Centos 9 Cloud image: https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2 
+
+vmg_nw_name: k8s-net
+vmg_nw_bridge: br0-k8s
+vmg_nw_gateway: 192.168.200.1
+vmg_nw_mask: 255.255.255.0
+vmg_nw_dhcp_start: 192.168.200.151
+vmg_nw_dhcp_end: 192.168.200.254
+vmg_nw_file_path: 'generated/libvirt-config.yml'
+
+vmg_vm_domain: homelab.k8s
+vmg_vm_image_link: https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2 
+vmg_vm_first_ip_octet: 3
+vmg_vm_network: 192.168.200.0
+vmg_vm_netmask: 255.255.255.0
+vmg_vm_root_passwd: letmein
+vmg_vm_custom_cloud_user: "{{ ssh_user_name }}"
+vmg_vm_ssh_authorized_keys: "{{ lookup('file','do-not-delete/k8s_vms_rsa.pub') }}"
+vmg_vm_os_variant: rhel8.0
+vmg_vm_nm_controlled_network: 'yes'
+vmg_vm_storage_pool_name: k8s-store
+vmg_vm_file_path: 'generated/cloudinit-config.yml'
+
+vmg_vm_recreate: true
+
+
+# EDIT BELOW THIS LINE #
+
+vmg_vms_infra:
+  'utility':
+     count: 1
+     cpus: 2
+     memory: 2048
+     root_disk_size: 40G
+     hostname_spec: utility
+     alphabet: False
+     snapshot: False
+  'k8s-master':
+     count: 1
+     cpus: 2
+     memory: 2048
+     root_disk_size: 15G
+     hostname_spec: master
+     alphabet: False
+     snapshot: False
+     is_k8s_master: True
+  'k8s-worker':
+     count: 2
+     cpus: 2
+     memory: 2048
+     root_disk_size: 15G
+     hostname_spec: worker
+     alphabet: False
+     snapshot: False
+     is_k8s_worker: True

@@ -1,0 +1,266 @@
+# Objective is to apply the selected CNI plugin to the control plane
+#
+# ASSUMPTIONS:
+# Will make use of sudo password in the configs/password.yml in clear text
+#
+
+
+- name: Adding CNI addon in standard mode
+  hosts: utility
+  gather_facts: false
+  become: true
+  vars:
+    calico_env: '            - name: CALICO_IPV4POOL_CIDR'
+    calico_ip: '              value: "{{ pod_nw_cidr }}"'
+
+  vars_files:
+    - 'configs/password.yml'
+    - 'configs/k8s-config.yml'
+    - 'generated/cloudinit-config.yml'
+  tasks:
+    - name: Fetching kubeconfig from master to host
+      ansible.builtin.fetch:
+        src: /root/.kube/config
+        dest: /tmp/config
+        flat: true
+        mode: '0600'
+      delegate_to: '{{ groups.masters[0] }}'
+
+    - name: Create the ~/.kube folder
+      ansible.builtin.file:
+        path: /root/.kube
+        state: directory
+        mode: '0770'
+
+    - name: Copying kubeconfig resource to helper
+      ansible.builtin.copy:
+        src: /tmp/config
+        dest: /root/.kube/
+        mode: '0600'
+
+    - name: Delete kubeconfig from host
+      ansible.builtin.file:
+        path: /tmp/config
+        state: absent
+      become: false
+      delegate_to: localhost
+
+    - name: Setting Environment variable for k8s access
+      ansible.builtin.lineinfile:
+        path: ~/.bashrc
+        line: KUBECONFIG=$HOME/.kube/config
+        create: true
+        mode: '0644'
+
+    - name: Add k8s repositories to utility VM
+      ansible.builtin.yum_repository:
+        name: kubernetes
+        description: Kubernetes package repository
+        file: kubernetes
+        baseurl: https://pkgs.k8s.io/core:/stable:/v{{ k8s_repo_version }}/rpm/
+        enabled: true
+        gpgcheck: true
+        gpgkey: https://pkgs.k8s.io/core:/stable:/v{{ k8s_repo_version }}/rpm/repodata/repomd.xml.key
+        repo_gpgcheck: true
+        exclude: 'kubelet kubeadm kubectl cri-tools kubernetes-cni'
+        state: present
+
+    - name: Installing the kubectl cli on utility VM
+      ansible.builtin.yum:
+        name:
+          - kubectl-{{ k8s_package_version }}
+          - python3-pip
+        state: installed
+        disable_excludes: kubernetes
+
+    - name: Install pre-requisites
+      ansible.builtin.pip:
+        name:
+          - openshift
+          - pyyaml
+          - kubernetes
+
+    - name: Installing bash completion for kubectl
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl completion bash | sudo tee /etc/bash_completion.d/kubectl > /dev/null
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Updating application-list.readme
+      ansible.builtin.lineinfile:
+        line: '[x] kubectl was setup on Utility node (Helper)'
+        path: cluster-info.readme
+        create: true
+        mode: '0664'
+      become: false
+      delegate_to: localhost
+
+    - name: Installing Helm
+      ansible.builtin.include_role:
+        name: techiesanjay.utils.helm
+
+    - name: Updating application-list.readme
+      ansible.builtin.lineinfile:
+        line: '[x] Helm {{ helm_version }} installed on Utility node (Helper)'
+        path: cluster-info.readme
+        create: true
+        mode: '0664'
+      become: false
+      delegate_to: localhost
+
+    - name: Add label to worker nodes
+      ansible.builtin.command: kubectl label node {{ item.value.vm_local_hostname }} node-role.kubernetes.io/worker=worker --overwrite
+      loop: "{{ lookup('dict', cloud_vms_info, wantlist=True) }}"
+      when: item.key | regex_search('(worker)') in ['worker']
+      loop_control:
+        label: '{{ item.key }}'
+      changed_when: false
+
+    - name: End play decision
+      ansible.builtin.meta: end_play
+      when: cni_addon.mode != 'standard'
+
+    - name: Applying Calico CNI plugin
+      when: cni_addon.name == 'calico'
+      block:
+        - name: Download the network CNI plugin on master
+          ansible.builtin.get_url:
+            url: "{{ calico_url }}"
+            dest: /tmp
+            force: true
+            mode: '0660'
+
+        - name: Update the CNI plugin with k8s pod CIDR
+          ansible.builtin.blockinfile:
+            path: /tmp/calico.yaml
+            insertafter: '            #   value: "192.168.0.0/16"'
+            marker: ' '
+            content: |
+              {{ calico_env }}
+              {{ calico_ip }}
+
+        - name: Installing CNI plugin Calico
+          kubernetes.core.k8s:
+            state: present
+            src: /tmp/calico.yaml
+
+    - name: Applying Cilium CNI plugin
+      when: cni_addon.name == 'cilium'
+      block:
+        - name: Download Cilium tarball
+          ansible.builtin.get_url:
+            url: https://github.com/cilium/cilium-cli/releases/latest/download/cilium-linux-amd64.tar.gz
+            dest: ~/
+            force: true
+            mode: '0664'
+
+        - name: Expand Cilium tarball
+          ansible.builtin.unarchive:
+            remote_src: true
+            src: ~/cilium-linux-amd64.tar.gz
+            dest: /usr/local/bin/
+
+        - name: Executing Cilium install
+          ansible.builtin.command: /usr/local/bin/cilium install
+          changed_when: false
+
+    - name: Waiting for all cluster node(s) to be Ready (Be Patient)
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get nodes | tail -n +2 | awk '{print $2}'
+      args:
+        executable: /bin/bash
+      register: status
+      until: status.stdout_lines | unique | length == 1 and status.stdout_lines[0] == 'Ready'
+      retries: 36
+      delay: 10
+      changed_when: false
+
+    - name: Updating application-list.readme
+      ansible.builtin.lineinfile:
+        line: '[x] CNI addon {{ cni_addon.name | title }} was setup in {{ cni_addon.mode }} mode using kube-proxy'
+        path: cluster-info.readme
+        create: true
+        mode: '0664'
+      become: false
+      delegate_to: localhost
+
+
+- name: Adding CNI addon to cluster in ipvs or eBPF mode
+  hosts: utility
+  gather_facts: false
+  become: true
+  vars_files:
+    - 'configs/password.yml'
+    - 'configs/k8s-config.yml'
+  tasks:
+
+    - name: Getting HA status
+      ansible.builtin.include_vars:
+        file: generated/ha.yml
+
+    - name: End play decision
+      ansible.builtin.meta: end_play
+      when: cni_addon.mode != 'eBPF' and cni_addon.mode != 'ipvs'
+
+    - name: Setting up Cillium using eBPF mode
+      when: cni_addon.name == 'cilium' and cni_addon.mode == 'eBPF'
+      block:
+        - name: Add latest Cillium CNI(Container Network Interface) chart repo
+          kubernetes.core.helm_repository:
+            name: cilium
+            repo_url: "https://helm.cilium.io"
+            state: present
+
+        - name: Install Helm Diff plugin
+          kubernetes.core.helm_plugin:
+            plugin_path: https://github.com/databus23/helm-diff
+            state: present
+
+        - name: Update helm repo
+          ansible.builtin.command: helm repo update
+          changed_when: true
+
+        - name: Deploy Cillium CNI using helm
+          kubernetes.core.helm:
+            state: present
+            kubeconfig: "/root/.kube/config"
+            name: cilium
+            chart_ref: cilium/cilium
+            release_namespace: cilium-system
+            create_namespace: true
+            wait: true
+            chart_version: '{{ cilium_version }}'
+            values:
+              ipam:
+                mode: kubernetes
+              kubeProxyReplacement: strict
+              bpf:
+                masquerade: true
+              autoDirectNodeRoutes: true
+              ipv4NativeRoutingCIDR: '{{ pod_nw_cidr }}'
+              hubble:
+                enabled: true
+                relay:
+                  enabled: true
+                ui:
+                  enabled: true
+              tunnel: disabled
+              k8sServiceHost: "{{ ha_virtual_ip if ha_cluster == true else hostvars[groups.masters[0]].ansible_host }}"
+              k8sServicePort: "{{ haproxy_apiserver_port if ha_cluster == true else 6443 }}"
+              operator:
+                replicas: "{{ 2 if (groups['workers'] | length > 3) else 1 }}"
+                nodeSelector:
+                  node-role.kubernetes.io/worker: worker
+              devices: "{{ cni_interface }}"
+
+        - name: Updating application-list.readme
+          ansible.builtin.lineinfile:
+            line: '[x] CNI addon {{ cni_addon.name | title }} was setup in {{ cni_addon.mode }} mode with kube-proxy disabled'
+            path: cluster-info.readme
+            create: true
+            mode: '0664'
+          become: false
+          delegate_to: localhost

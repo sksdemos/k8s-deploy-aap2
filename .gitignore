@@ -1,0 +1,12 @@
+tasks/kubeadm_init_cmd.yml
+01_download_collections.yml
+bootstrap_k8s_with_standalone_vms.yml
+cluster-info.readme
+ansible.cfg
+inventory
+test.yml
+do-not-delete/
+cloud_images/
+generated/
+roles/
+split_and_backup/

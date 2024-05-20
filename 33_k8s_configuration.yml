@@ -1,0 +1,135 @@
+---
+# Objective is to configure all k8s cluster VMs before installing the k8s package
+#
+# ASSUMPTIONS:
+# Will make use of sudo password in the configs/password.yml in clear text
+#
+#
+
+
+- name: Configuring VMs for Kubernetes
+  hosts: cluster
+  gather_facts: false
+  become: true
+  vars_files:
+    - 'configs/password.yml'
+    - 'configs/k8s-config.yml'
+
+  tasks:
+    - name: Presistently adding kernel modules for k8s
+      ansible.builtin.copy:
+        content: |
+          overlay
+          br_netfilter
+        dest: /etc/modules-load.d/k8s.conf
+        mode: '0644'
+
+    - name: Update Kernel to allow a process to bind to a non-local IP address
+      ansible.builtin.copy:
+        content: |
+          net.ipv4.ip_nonlocal_bind=1
+        dest: /etc/sysctl.d/ip_nonlocal_bind.conf
+        mode: '0644'
+
+    - name: Running modprobe for kernel modules for k8s
+      community.general.modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - 'overlay'
+        - 'br_netfilter'
+
+    - name: Updating necessary sysctl parameters for k8s
+      ansible.posix.sysctl:
+        name: "{{ item }}"
+        value: '1'
+        sysctl_set: true
+        state: present
+        reload: true
+      loop:
+        - 'net.bridge.bridge-nf-call-ip6tables'
+        - 'net.bridge.bridge-nf-call-iptables'
+        - 'net.ipv4.ip_forward'
+        - 'net.ipv4.ip_nonlocal_bind'
+
+    - name: Add k8s repositories to all cluster nodes
+      ansible.builtin.yum_repository:
+        name: kubernetes
+        description: Kubernetes package repository
+        file: kubernetes
+        baseurl: https://pkgs.k8s.io/core:/stable:/v{{ k8s_repo_version }}/rpm/
+        enabled: true
+        gpgcheck: true
+        gpgkey: https://pkgs.k8s.io/core:/stable:/v{{ k8s_repo_version }}/rpm/repodata/repomd.xml.key
+        repo_gpgcheck: true
+        exclude: 'kubelet kubeadm kubectl cri-tools kubernetes-cni'
+        state: present
+
+
+    - name: Drop SELinux to Permissive mode
+      ansible.builtin.command: setenforce 0
+      changed_when: false
+
+    - name: Persistently Set SELinux to Permissive mode
+      ansible.builtin.lineinfile:
+        path: /etc/selinux/config
+        regexp: "^SELINUX=enforcing"
+        line: "SELINUX=permissive"
+        state: present
+        backup: true
+
+    - name: Installing and configuring Containerd
+      ansible.builtin.import_tasks: tasks/configure_docker.yml
+      when: cri == 'docker'
+
+    - name: Installing and configuring Containerd
+      ansible.builtin.import_tasks: tasks/configure_containerd.yml
+      when: cri == 'containerd'
+
+    - name: Installing and configuring CRI-O
+      ansible.builtin.import_tasks: tasks/configure_cri-o.yml
+      when: cri == 'cri-o'
+
+    - name: Installing Kubernetes packages
+      ansible.builtin.yum:
+        name:
+          - 'kubelet-{{ k8s_package_version }}'
+          - 'kubeadm-{{ k8s_package_version }}'
+          - 'kubectl-{{ k8s_package_version }}'
+          - iproute-tc
+        disable_excludes: kubernetes
+        state: installed
+
+    - name: Installing bash completion for kubectl
+      shell: kubectl completion bash | sudo tee /etc/bash_completion.d/kubectl > /dev/null
+
+    - name: Start and enable Kubelet service
+      ansible.builtin.service:
+        name: kubelet
+        state: started
+        enabled: true
+
+
+    # NOTE: at this point the kubelet service is now in a crashloop and restarting every few seconds,
+    #       as it waits for kubeadm to tell it what to do
+
+
+- name: Removing clusterinfo.readme
+  hosts: localhost
+  gather_facts: false
+  become: false
+  vars_files:
+    - 'configs/password.yml'
+  vars:
+    ansible_connection: local
+  tasks:
+    - name: Check for an existing cluster-info.readme
+      ansible.builtin.stat:
+        path: cluster-info.readme
+      register: result
+
+    - name: Delete cluster-info.readme if it exist
+      ansible.builtin.file:
+        path: cluster-info.readme
+        state: absent
+      when: result.stat.exists

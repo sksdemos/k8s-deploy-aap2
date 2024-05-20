@@ -1,0 +1,12 @@
+- import_playbook: bootstrap/05_generate_ssh_keypair.yml
+- import_playbook: bootstrap/09_generate_vm_manifests.yml
+- import_playbook: bootstrap/13_libvirt_configuration.yml
+- import_playbook: bootstrap/17_create_cluster_vms.yml
+- import_playbook: bootstrap/21_generate_inventory.yml
+- import_playbook: bootstrap/25_cluster_sizing_check.yml
+- import_playbook: bootstrap/29_dns_conf_etchosts.yml
+- import_playbook: bootstrap/33_k8s_configuration.yml
+- import_playbook: bootstrap/37_check_for_ha_configuration.yml
+- import_playbook: bootstrap/41_init_k8s_masters.yml
+- import_playbook: bootstrap/45_k8s_workers_configuration.yml
+- import_playbook: bootstrap/49_apply_cni_plugin_to_k8s.yml

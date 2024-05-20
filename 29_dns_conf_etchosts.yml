@@ -1,0 +1,58 @@
+---
+# This play generates a hosts file by processing the inventory
+#
+# ASSUMPTIONS:
+# Will make use of sudo password in the configs/password.yml in clear text
+#
+
+- name: Generating hosts file for name resolution
+  hosts: localhost
+  gather_facts: false
+  become: false
+  vars_files:
+    - 'configs/password.yml'
+
+  vars:
+    ansible_become_password: "{{ sudo_password }}"
+    ansible_connection: local
+
+  tasks:
+
+    - name: Creating initial hosts file
+      ansible.builtin.copy:
+        content: |
+          127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+          ::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+        dest: generated/hosts
+        mode: '0664'
+
+    - name: Adding VM details to hosts file
+      ansible.builtin.lineinfile:
+        path: generated/hosts
+        line: '{{ hostvars[item].ansible_host }} {{ item }} {{ hostvars[item].inventory_hostname_short }}'
+      loop: "{{ groups.all }}"
+
+
+# This Playbook injects /etc/hosts into each cluster machine for name resolution
+#
+# ASSUMPTIONS:
+# None
+#
+# NOTE: This step is necessary for Kubernetes to get information about other machines in the cluster
+#
+
+- name: Readying all VMs for Ansible provisioning
+  hosts: all
+  gather_facts: false
+  vars_files:
+    - 'configs/password.yml'
+
+  tasks:
+
+    - name: Adding /etc/hosts to all VMs
+      ansible.builtin.copy:
+        src: generated/hosts
+        dest: /etc/hosts
+        owner: root
+        group: root
+        mode: '0644'

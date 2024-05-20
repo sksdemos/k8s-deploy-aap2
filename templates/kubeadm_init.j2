@@ -1,0 +1,38 @@
+{{ ansible_managed | comment }}
+- name: Initializing the controlplane using {{ cri }}
+  ansible.builtin.shell: >
+    kubeadm init
+    --apiserver-advertise-address {{ hostvars[ groups.masters[0] ].ansible_host }}
+{% if cni_addon.name == 'cilium' %}
+    --skip-phases=addon/kube-proxy
+{% endif %}
+{% if cni_addon.name == 'calico' and cni_addon.mode == 'eBPF' %}
+    --skip-phases=addon/kube-proxy
+{% endif %}
+    --pod-network-cidr {{ pod_nw_cidr }}
+{% if cri == 'docker' %}
+    --service-cidr {{ service_nw_cidr }} > /root/controlplane.log
+{% else %}
+    --service-cidr {{ service_nw_cidr }}
+{% endif %}
+{% if cri == 'containerd' %}
+{% if ha_cluster == false %}
+    --cri-socket /run/containerd/containerd.sock > /root/controlplane.log
+{% else %}
+    --cri-socket /run/containerd/containerd.sock
+{% endif %}
+{% endif %}
+{% if cri == 'cri-o' %}
+{% if ha_cluster == false %}
+    --cri-socket unix:///var/run/crio/crio.sock > /root/controlplane.log
+{% else %}
+    --cri-socket unix:///var/run/crio/crio.sock
+{% endif %}
+{% endif %}
+{% if ha_cluster == true %}
+    --control-plane-endpoint {{ ha_virtual_ip }}:{{ haproxy_apiserver_port }}
+    --upload-certs > /root/controlplane.log
+{% endif %}
+  async: 600
+  poll: 5
+  changed_when: false

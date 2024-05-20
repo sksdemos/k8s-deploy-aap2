@@ -1,0 +1,9 @@
+# This file contains ignores rule violations for ansible-lint
+exclude_paths:
+  - tasks/
+skip_list:
+  - yaml[line-length]
+  - run-once[play]
+  - run-once[task]
+
+

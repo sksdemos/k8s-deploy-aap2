@@ -1,0 +1,30 @@
+---
+# This play generates a cluster inventory on the basis of the information in the dictionary cloud_vms_info
+# withing generated/cloudinit-config.yml
+#
+# ASSUMPTIONS:
+# Will make use of sudo password in the configs/password.yml in clear text
+#
+
+- name: Generating cluster inventory
+  hosts: localhost
+  gather_facts: false
+  become: false
+  vars_files:
+    - 'configs/password.yml'
+    - 'generated/cloudinit-config.yml'
+
+  vars:
+    ansible_become_password: "{{ sudo_password }}"
+    ansible_connection: local
+
+  tasks:
+
+    - name: Writing inventory to disk
+      ansible.builtin.template:
+        src: templates/inventory.j2
+        dest: inventory
+        mode: '0664'
+
+    - name: Refreshing the inventory
+      ansible.builtin.meta: refresh_inventory

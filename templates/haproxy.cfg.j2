@@ -1,0 +1,43 @@
+global
+  log /dev/log  local0
+  log /dev/log  local1 notice
+  stats socket /var/lib/haproxy/stats level admin
+  chroot /var/lib/haproxy
+  user haproxy
+  group haproxy
+  daemon
+
+defaults
+  log global
+  mode  http
+  option  httplog
+  option  dontlognull
+        timeout connect 5000
+        timeout client 50000
+        timeout server 50000
+
+frontend kubernetes
+    bind *:{{ haproxy_apiserver_port }}
+    option tcplog
+    mode tcp
+    default_backend k8s_apiserver
+
+backend k8s_apiserver
+    mode tcp
+    balance roundrobin
+    option tcp-check
+{% for item in cloud_vms_info|dict2items %}
+{% if item.key | regex_search('(master|worker)') in ['master'] %}
+    server {{item.key}} {{item.value.vm_static_ip}}:6443 check fall 3 rise 2
+{% endif %}
+{% endfor %}
+
+
+listen stats 
+    bind *:{{ haproxy_url_port }}
+    mode http
+    stats enable
+    stats uri /
+    stats refresh 10s
+    stats realm HAProxy\ Statistics
+    stats auth {{ haproxy_username }}:{{ haproxy_password }}

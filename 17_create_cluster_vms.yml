@@ -1,0 +1,45 @@
+---
+# This Playbook creates the Utility VM and all VMs in the Kubernetes cluster (Masters and Workers)
+#
+# ASSUMPTIONS:
+# The host should have access to the Internet for the download of cloud images OR
+# The necessary cloud image is available in a local folder name cloud_images from where this playbook is running
+# Will make use of sudo password in the configs/password.yml in clear text
+# Overriding of variables in role/defaults is in configs/cloudinit-config.yml.
+# VMs created using cloud-init require a DHCP lease compulsarily which is initially provided by the libvirt network
+# cloud-init configuration then replaces the network with a static IP
+#
+# NOTE: The entire VM infrastructure creation is driven using the role cloud-init
+#
+
+- name: Cloud-init configuration
+  hosts: localhost
+  become: true
+  vars_files:
+    - 'configs/password.yml'
+    - 'generated/cloudinit-config.yml'
+
+  vars:
+    ansible_become_password: "{{ sudo_password }}"
+    ansible_connection: local
+
+  tasks:
+    - name: Starting with cloud-init configuration
+      ansible.builtin.import_role:
+        name: techiesanjay.libvirt_infra.cloud_init
+
+
+    # Subsequent playbook are dependent on SSH availability for Ansible access
+    # Waiting for SSH availability on all VMs in this infrastructure.
+
+    - name: Wait for SSH to be available on VM/s
+      ansible.builtin.wait_for:
+        host: "{{ item.value.vm_static_ip }}"
+        state: started
+        delay: 0
+        timeout: 600
+        port: 22
+      become: false
+      loop: "{{ lookup('dict', cloud_vms_info, wantlist=True) }}"
+      loop_control:
+        label: "{{ item.key }}"

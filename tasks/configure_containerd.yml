@@ -1,0 +1,22 @@
+- name: Install container runtime interface Containerd
+  ansible.builtin.yum:
+    name: "{{ containerd_url }}"
+    disable_gpg_check: true
+    state: installed
+
+- name: Generate containerd configuration
+  ansible.builtin.shell: '/usr/bin/containerd config default > /etc/containerd/config.toml'
+  changed_when: true
+
+- name: Update cgroup driver in Containerd config.toml
+  ansible.builtin.lineinfile:
+    path: /etc/containerd/config.toml
+    regexp: '            SystemdCgroup = false'
+    line: '            SystemdCgroup = true'
+    state: present
+
+- name: Start and enable containerd
+  ansible.builtin.service:
+    name: containerd
+    state: started
+    enabled: true

@@ -1,0 +1,25 @@
+# Objective is to join all k8s workers to the control plane
+#
+# ASSUMPTIONS:
+# Will make use of sudo password in the configs/password.yml in clear text
+#
+
+
+- name: Starting with Kubernetes worker configuration
+  hosts: workers
+  gather_facts: false
+  vars_files:
+    - 'configs/password.yml'
+    - 'configs/k8s-config.yml'
+
+  tasks:
+
+    - name: Copy join scripts to worker node(s)
+      ansible.builtin.copy:
+        src: generated/join_workers.sh
+        dest: ~/join_workers.sh
+        mode: '0770'
+
+    - name: Joining worker nodes to k8s cluster
+      ansible.builtin.shell: '~/join_workers.sh > /root/workers.log'
+      changed_when: true

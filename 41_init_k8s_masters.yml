@@ -1,0 +1,185 @@
+# Objective is to initialize k8s master(s) to bootstrap the control plane
+#
+# ASSUMPTIONS:
+# Will make use of sudo password in the configs/password.yml in clear text
+# Bootstraps the primary master
+# Configures the k8s primary master with Calico CNI network plugin
+# In non HA mode it Will configure at least one primary master and build join scripts for worker nodes
+# If the playbook detects HA then it will create a primary master and join all secondary masters to the control plane
+# It will produce join scripts for secondary masters and worker nodes to join the cluster
+#
+
+
+- name: Starting Kubernetes master configuration
+  hosts: "{{ groups.masters[0] }}"                    # Primary master
+  gather_facts: false
+  become: true
+  vars_files:
+    - 'configs/password.yml'
+    - 'configs/k8s-config.yml'
+  tasks:
+
+    - name: Ensure Pip is installed.
+      ansible.builtin.yum:
+        name: 
+          - python3-pip
+          - git
+        state: present
+
+    - name: Ensure OpenShift client is installed.
+      ansible.builtin.pip:
+        name: openshift
+        state: present
+
+    - name: Getting HA status
+      ansible.builtin.include_vars:
+        file: generated/ha.yml
+
+    # This will create a virtual IP that will be used by the apiserver
+    - name: Starting keepalived for primary master
+      ansible.builtin.service:
+        name: keepalived
+        state: started
+        enabled: true
+      when: ha_cluster == true
+
+    - name: Creating initial join script for additional masters
+      ansible.builtin.copy:
+        content: "#!/bin/bash\n"
+        dest: ~/join_masters.sh
+        mode: '0770'
+      when: ha_cluster == true
+
+    - name: Creating initial join script for workers
+      ansible.builtin.copy:
+        content: "#!/bin/bash\n"
+        dest: ~/join_workers.sh
+        mode: '0770'
+
+    - name: Initializing single node control plane
+      ansible.builtin.import_tasks: tasks/single_node_controlplane.yml
+      when: ha_cluster == false
+
+    - name: Initializing high availability control plane
+      ansible.builtin.import_tasks: tasks/ha_controlplane.yml
+      when: ha_cluster == true
+
+    - name: Creating .kube directory on k8s primary master
+      ansible.builtin.file:
+        path: '~/.kube'
+        state: directory
+        mode: '0770'
+
+    - name: Copying admin.conf to .kube/config file on k8s primary master
+      ansible.builtin.command: 'cp /etc/kubernetes/admin.conf ~/.kube/config'
+      changed_when: true
+
+    - name: Setting permissions on .kube/config file on primary master
+      ansible.builtin.file:
+        path: '~/.kube/config'
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Setting KUBECONFIG Environment variable on primary master
+      ansible.builtin.lineinfile:
+        path: ~/.bashrc
+        line: KUBECONFIG=$HOME/.kube/config
+        create: true
+        mode: '0644'
+
+
+
+- name: Adding Secondary master(s) Kubernetes controlplane
+  hosts: "{{ groups.masters | reject('search',groups.masters[0]) | list }}"
+  gather_facts: false
+  vars_files:
+    - 'configs/k8s-config.yml'
+  tasks:
+
+    - name: Getting HA status
+      ansible.builtin.include_vars:
+        file: generated/ha.yml
+
+    - name: End play decision
+      ansible.builtin.meta: end_play
+      when: ha_cluster == false
+
+    - name: Copy join script to secondary master(s)
+      ansible.builtin.copy:
+        src: generated/join_masters.sh
+        dest: ~/join_masters.sh
+        mode: '0770'
+
+    - name: Joining secondary master(s) to controlplane
+      ansible.builtin.shell: '~/join_masters.sh > /root/masters-{{ inventory_hostname }}.log'
+      changed_when: true
+      ignore_errors: true
+
+    - name: Creating .kube directory on secondary master(s)
+      ansible.builtin.file:
+        path: '~/.kube'
+        state: directory
+        mode: '0770'
+
+    - name: Copying admin.conf to .kube/config file on secondary master(s)
+      ansible.builtin.command: 'cp /etc/kubernetes/admin.conf ~/.kube/config'
+      changed_when: true
+
+    - name: Setting permissions on .kube/config file on secondary master(s)
+      ansible.builtin.file:
+        path: '~/.kube/config'
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Setting KUBECONFIG Environment variable on secondary masters(s)
+      ansible.builtin.lineinfile:
+        path: ~/.bashrc
+        line: KUBECONFIG=$HOME/.kube/config
+        create: true
+        mode: '0644'
+
+    # This will create failover virtual IP that will be used for the apiserver
+    - name: Starting keepalived all secondary master(s)
+      ansible.builtin.service:
+        name: keepalived
+        state: started
+        enabled: true
+
+    - name: Pause for 8 seconds for keepalived to sync with primary
+      ansible.builtin.pause:
+        seconds: 8
+
+
+- name: Updating clusterinfo.readme
+  hosts: localhost
+  gather_facts: false
+  become: false
+  vars_files:
+    - 'configs/password.yml'
+    - 'configs/k8s-config.yml'
+  vars:
+    ansible_connections: local
+  tasks:
+    - name: Getting HA status
+      ansible.builtin.include_vars:
+        file: generated/ha.yml
+
+    - name: End play decision
+      ansible.builtin.meta: end_play
+      when: not ha_cluster
+
+    - name: Updating HA details
+      ansible.builtin.lineinfile:
+        line: 'K8s Cluster installation: (HA mode)'
+        path: cluster-info.readme
+        create: true
+        mode: '0664'
+
+    - name: Adding haproxy details cluster-info.readme
+      ansible.builtin.lineinfile:
+        line: '--> Access haproxy on http://{{ ha_virtual_ip }}:{{ haproxy_url_port }} with Auth: {{ haproxy_username }}/{{ haproxy_password }}'
+        path: cluster-info.readme
+        create: true
+        mode: '0664'

@@ -1,0 +1,37 @@
+- name: Generating kubeadm init commandline
+  ansible.builtin.template:
+    src: templates/kubeadm_init.j2
+    dest: tasks/kubeadm_init_cmd.yml
+    mode: '0664'
+  become: false
+  delegate_to: localhost
+
+- name: Including kubeadm command line
+  ansible.builtin.include_tasks:
+    file: tasks/kubeadm_init_cmd.yml
+
+- name: Get the token for joining the worker nodes
+  ansible.builtin.command: kubeadm token create  --print-join-command
+  register: join_command_workers
+  changed_when: false
+
+- name: Adding Docker details to workers join script
+  ansible.builtin.shell: echo "{{ join_command_workers.stdout_lines[0] }}" >> ~/join_workers.sh
+  changed_when: true
+  when: cri == 'docker'
+
+- name: Adding ContainerD details to workers join script
+  ansible.builtin.shell: echo "{{ join_command_workers.stdout_lines[0] }} --cri-socket /run/containerd/containerd.sock" >> ~/join_workers.sh
+  changed_when: true
+  when: cri == 'containerd'
+
+- name: Adding CRI-O details to workers join script
+  ansible.builtin.shell: echo "{{ join_command_workers.stdout_lines[0] }} --cri-socket unix:///var/run/crio/crio.sock" >> ~/join_workers.sh
+  changed_when: true
+  when: cri == 'cri-o'
+
+- name: Copying workers join script to host machine
+  ansible.builtin.fetch:
+    src: ~/join_workers.sh
+    dest: ./generated/join_workers.sh
+    flat: true

@@ -1,0 +1,146 @@
+#----------------------------------------#
+#     k8s version specific variables     #
+#----------------------------------------#
+
+# Kubernetes version to install
+k8s_package_version: 1.29.0
+
+
+# k8s repository version
+k8s_repo_version: 1.29
+
+# NOTES: This will be used to point to the yum repository version for Kubernetes. Must match with the package version and should only indicate major and minor version
+
+
+pod_nw_cidr: '10.30.0.0/16'
+service_nw_cidr: '172.16.0.0/16'
+
+# NOTES: The pod network and service network cidr will be used by the kubeadm init command to bootstrap the control plane
+
+
+
+
+#---------------------------------------------#
+#     Cluster High Availability variables     #
+#---------------------------------------------# 
+
+#---- keepalived related settings ----#
+ha_virtual_ip: 192.168.200.2
+
+# NOTE: The above Virtual IP will be implemented on keepalived. This virtual ip will be used for the k8s apiserver endpoint. 
+#       Ensure that this Virtual IP address matches with the network range of the cluster VMs static ip address
+
+
+
+#---- haproxy related settings ----#
+haproxy_username: admin
+haproxy_password: haproxy
+haproxy_url_port: 5100
+haproxy_apiserver_port: 8443
+
+# NOTE: Variables for keepalived and haproxy are only be used when HA configuration kicks in
+
+
+
+
+
+#-------------------------------#
+#     K8s Container Runtime     #
+#-------------------------------#
+
+# Variable specifying container runtime interface to be used. 
+cri: 'containerd'
+
+# NOTES:
+# Can hold three values 'docker' 'containerd' or 'cri-o'
+# You might not want to set the value as 'docker' as Docker CE repository has way too many packages
+#
+# Best to settle with 'containerd' or 'cri-o'
+
+
+
+# Set this variable for containerd container runtime
+containerd_url: https://download.docker.com/linux/centos/8/x86_64/stable/Packages/containerd.io-1.6.9-3.1.el8.x86_64.rpm
+
+# NOTES:
+# Will be used only when cri: 'containerd'. Else it is ignored
+
+
+# Set these variables for CRI-O container runtime
+os: CentOS_9_Stream		# This should match with the cloud image you are using
+version: '1.29'                 # This value must match with the Kubernetes version that you are installing
+
+# NOTES:
+# Will be used only when cri: 'cri-o'. Else it is ignored
+# CRI-O major version needs to be the same version as Kubernetes major version. Refer to the documentation
+# https://kubernetes.io/docs/setup/production-environment/container-runtimes/#cri-o
+# WARNING: Failure to adhere to this will result in Cluster install failure
+
+
+
+
+#------------------------------------#
+#    k8s Container Network Addon     #
+#------------------------------------#
+
+# Variable to specify container networking addons
+calico_url: https://docs.projectcalico.org/manifests/calico.yaml
+
+cilium_version: 'v1.14.9'
+# NOTE: Version of the Cilium helm chart to be deployed
+
+cni_interface: 'eth0'
+
+cni_addon:
+  name: cilium
+  mode: eBPF
+
+# NOTES: cni_addon.name can be set to calico or cilium
+#        cni_addon.mode can be standard, ipvs, eBPF. The ipvs mode can be used if cni_addon.name is calico
+
+# standard uses kube-proxy in iptables mode by using sequential rules to process connections
+# eBPF - Extended Berkley Packet Filter disables kube-proxy and iptables
+# ipvs - IP Virtual Server uses kube-proxy in ipvs mode and uses a hash table managed by the kernel to establish the destination of a packet.
+
+# NOTES:
+# These variables are for container networking addons like calico, flannel, weave etc to name a few
+# Refer to the documentation. https://kubernetes.io/docs/concepts/cluster-administration/addons/
+# This tool will make use of cni_url to setup third-party networking and networking policies for Kubernetes
+#
+# Different networking addons may have a different process of setting up that may require modification to the 41_apply_cni_plugin_to_k8s.yml playbook
+# At present this CODEBASE is designed to work with CILIUM or CALICO
+
+
+
+
+#------------------------#
+#     HELM Variables     #
+#------------------------#
+
+helm_version: 'v3.14.0'
+helm_path: /usr/bin/helm
+
+
+
+#--------------------------------------#
+#     Optional component variables     #
+#--------------------------------------#
+
+# Dictionary to install additional k8s components
+components:
+  install_kubectl_on_host: true
+  install_octant_dashboard: true
+  install_nfs_storage_provisioner: true
+  install_metrics_server: true
+  install_kube_state_metrics: true
+  install_metallb_loadbalancer: true
+  install_nginx_ingress_controller: true
+
+
+
+
+
+# --- DO NOT EDIT BELOW THIS LINE ---#
+
+ha_cluster: false
+# NOTES: Defaults to a false. Playbook will automatically set this to a true when the number of masters >= 3 and in odd numbers
